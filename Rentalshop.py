@@ -22,7 +22,6 @@ with conn.session as session:
         referred_by_name TEXT, referred_by_phone TEXT, start_time TEXT, status TEXT, 
         deposit REAL, total_bill REAL, is_paid INTEGER, customer_photo TEXT, return_time TEXT)'''))
     
-    # Check if return_time column exists (Self-Healing for Cloud DB)
     try:
         session.execute(text("ALTER TABLE rentals ADD COLUMN IF NOT EXISTS return_time TEXT"))
     except:
@@ -40,7 +39,7 @@ def generate_pdf(df, report_type):
     pdf.ln(5)
     
     pdf.set_font("Arial", 'B', 8)
-    pdf.cell(35, 10, "Customer", 1); pdf.cell(35, 10, "Rented At", 1); pdf.cell(35, 10, "Returned At", 1); pdf.cell(30, 10, "Item", 1); pdf.cell(25, 10, f"Bill ({CURRENCY})", 1); pdf.cell(30, 10, "Status", 1); pdf.ln()
+    pdf.cell(35, 10, "Customer", 1); pdf.cell(35, 10, "Rented At", 1); pdf.cell(35, 10, "Returned At", 1); pdf.cell(25, 10, f"Bill ({CURRENCY})", 1); pdf.cell(30, 10, "Status", 1); pdf.ln()
     
     pdf.set_font("Arial", size=8)
     total_sum = 0
@@ -48,7 +47,6 @@ def generate_pdf(df, report_type):
         pdf.cell(35, 10, str(row['customer_name'])[:15], 1)
         pdf.cell(35, 10, str(row['start_time'])[5:16], 1)
         pdf.cell(35, 10, str(row['return_time'])[5:16] if row['return_time'] else "-", 1)
-        pdf.cell(30, 10, "Item", 1) # Placeholder for simplicity
         pdf.cell(25, 10, f"{row['total_bill'] or 0}", 1)
         pdf.cell(30, 10, "Paid" if row['is_paid'] else "Settled", 1); pdf.ln()
         total_sum += (row['total_bill'] or 0)
@@ -130,9 +128,14 @@ else:
                 col_b.write(f"**{row['name']}** -> {row['customer_name']}")
                 col_b.caption(f"Started: {row['start_time']}")
                 if col_b.button("Return Item", key=f"ret_{row['id']}", use_container_width=True):
-                    # Time Calculation Logic
-                    start_dt = datetime.strptime(row['start_time'], "%Y-%m-%d %I:%M %p")
-                    days = max(1, (datetime.now() - start_dt).days + (1 if (datetime.now() - start_dt).seconds > 60 else 0))
+                    # Robust Time Parsing
+                    try:
+                        start_dt = pd.to_datetime(row['start_time'])
+                    except:
+                        start_dt = datetime.now() # Fallback if data is corrupted
+                    
+                    diff = datetime.now() - start_dt
+                    days = max(1, diff.days + (1 if diff.seconds > 60 else 0))
                     total = days * row['rate']
                     ret_str = datetime.now().strftime("%Y-%m-%d %I:%M %p")
                     with conn.session as session:
@@ -155,7 +158,8 @@ else:
         st.header("📊 Reports")
         history_df = conn.query("SELECT * FROM rentals WHERE status='Closed'", ttl=0)
         if not history_df.empty:
-            history_df['date_obj'] = pd.to_datetime(history_df['start_time']).dt.date
+            # FIX: Format-flexible date parsing
+            history_df['date_obj'] = pd.to_datetime(history_df['start_time'], errors='coerce').dt.date
             f_mode = st.radio("Duration", ["Today", "This Month", "Custom"], horizontal=True)
             if f_mode == "Today": start_f = end_f = date.today()
             elif f_mode == "This Month": start_f, end_f = date.today().replace(day=1), date.today()
@@ -180,4 +184,3 @@ else:
                 c2.write(f"**🕒 Rented:** {row['start_time']}")
                 c2.write(f"**🕒 Returned:** {row['return_time'] or 'N/A'}")
                 c2.write(f"**📞 Phone:** {row['customer_phone']}")
-                if row['referred_by_name']: c2.write(f"👤 **Referred By:** {row['referred_by_name']}")
