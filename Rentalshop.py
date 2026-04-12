@@ -5,10 +5,12 @@ import hashlib
 import base64
 from fpdf import FPDF
 from sqlalchemy import text
+import pytz  # For Indian Standard Time
 
 # --- CONFIGURATION ---
 SHOP_NAME = "Star Arts and Multiservices"
 CURRENCY = "Rs."
+IST = pytz.timezone('Asia/Kolkata')
 
 # --- DATABASE CONNECTION ---
 conn = st.connection("postgresql", type="sql")
@@ -29,8 +31,10 @@ with conn.session as session:
     session.commit()
 
 # --- HELPERS ---
+def get_now_ist():
+    return datetime.now(IST)
+
 def safe_b64_decode(img_str):
-    """Safely decodes base64 strings, returning None if data is invalid or empty."""
     if not img_str or not isinstance(img_str, str) or img_str.strip() == "" or img_str == "None":
         return None
     try:
@@ -44,7 +48,7 @@ def generate_pdf(df, report_type):
     pdf.set_font("Arial", 'B', 16)
     pdf.cell(200, 10, txt=SHOP_NAME, ln=True, align='C')
     pdf.set_font("Arial", size=10)
-    pdf.cell(200, 10, txt=f"Revenue Report: {report_type} | Generated: {datetime.now().strftime('%d %b %Y')}", ln=True, align='C')
+    pdf.cell(200, 10, txt=f"Revenue Report: {report_type} | Generated: {get_now_ist().strftime('%d %b %Y %I:%M %p')}", ln=True, align='C')
     pdf.ln(5)
     
     pdf.set_font("Arial", 'B', 8)
@@ -119,7 +123,7 @@ else:
                     st.error("Item, Name, and Phone are required.")
                 else:
                     item_id = int(items_df[items_df['name'] == selected_item]['id'].values[0])
-                    now_str = datetime.now().strftime("%Y-%m-%d %I:%M %p")
+                    now_str = get_now_ist().strftime("%Y-%m-%d %I:%M %p")
                     with conn.session as session:
                         session.execute(text('''INSERT INTO rentals (item_id, customer_name, customer_phone, referred_by_name, referred_by_phone, start_time, status, deposit, is_paid, customer_photo) 
                                      VALUES (:i, :cn, :cp, :rn, :rp, :st, 'Active', :d, :ip, :ph)'''), 
@@ -128,7 +132,7 @@ else:
                         session.commit(); st.rerun()
 
         st.divider()
-        st.header("⏳ Active Sessions")
+        st.header("⏳ Active Sessions (IST)")
         active = conn.query("SELECT r.*, i.name, i.rate FROM rentals r JOIN inventory i ON r.item_id = i.id WHERE r.status='Active'", ttl=0)
         for _, row in active.iterrows():
             with st.container(border=True):
@@ -142,16 +146,17 @@ else:
                 col_b.write(f"**{row['name']}** -> {row['customer_name']}")
                 col_b.caption(f"Started: {row['start_time']}")
                 if col_b.button("Return Item", key=f"ret_{row['id']}", use_container_width=True):
+                    now_ist = get_now_ist()
                     try:
-                        start_dt = pd.to_datetime(row['start_time'], errors='coerce')
-                        if pd.isna(start_dt): start_dt = datetime.now()
+                        # Convert stored string back to an IST datetime object for math
+                        start_dt = IST.localize(datetime.strptime(row['start_time'], "%Y-%m-%d %I:%M %p"))
                     except:
-                        start_dt = datetime.now()
+                        start_dt = now_ist
                     
-                    diff = datetime.now() - start_dt
+                    diff = now_ist - start_dt
                     days = max(1, diff.days + (1 if diff.seconds > 60 else 0))
                     total = days * row['rate']
-                    ret_str = datetime.now().strftime("%Y-%m-%d %I:%M %p")
+                    ret_str = now_ist.strftime("%Y-%m-%d %I:%M %p")
                     with conn.session as session:
                         session.execute(text("UPDATE rentals SET status='Closed', total_bill=:t, return_time=:rt WHERE id=:id"), {"t": total, "rt": ret_str, "id": int(row['id'])})
                         session.execute(text("UPDATE inventory SET rented_qty = rented_qty - 1 WHERE id=:i"), {"i": int(row['item_id'])})
@@ -169,14 +174,15 @@ else:
         st.dataframe(conn.query("SELECT name, rate, total_qty, rented_qty FROM inventory", ttl=0), use_container_width=True)
 
     with tab_rev:
-        st.header("📊 Reports")
+        st.header("📊 Reports (IST)")
         history_df = conn.query("SELECT * FROM rentals WHERE status='Closed'", ttl=0)
         if not history_df.empty:
             history_df['date_obj'] = pd.to_datetime(history_df['start_time'], errors='coerce').dt.date
             f_mode = st.radio("Duration", ["Today", "This Month", "Custom"], horizontal=True)
-            if f_mode == "Today": start_f = end_f = date.today()
-            elif f_mode == "This Month": start_f, end_f = date.today().replace(day=1), date.today()
-            else: start_f, end_f = st.columns(2)[0].date_input("From"), st.columns(2)[1].date_input("To")
+            today_ist = get_now_ist().date()
+            if f_mode == "Today": start_f = end_f = today_ist
+            elif f_mode == "This Month": start_f, end_f = today_ist.replace(day=1), today_ist
+            else: start_f, end_f = st.columns(2)[0].date_input("From", today_ist), st.columns(2)[1].date_input("To", today_ist)
             
             f_df = history_df[(history_df['date_obj'] >= start_f) & (history_df['date_obj'] <= end_f)]
             st.metric("Total Revenue", f"{CURRENCY} {f_df['total_bill'].sum():,.2f}")
