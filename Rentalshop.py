@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 import hashlib
 import base64
 from fpdf import FPDF
@@ -29,6 +29,15 @@ with conn.session as session:
     session.commit()
 
 # --- HELPERS ---
+def safe_b64_decode(img_str):
+    """Safely decodes base64 strings, returning None if data is invalid or empty."""
+    if not img_str or not isinstance(img_str, str) or img_str.strip() == "" or img_str == "None":
+        return None
+    try:
+        return base64.b64decode(img_str)
+    except Exception:
+        return None
+
 def generate_pdf(df, report_type):
     pdf = FPDF()
     pdf.add_page()
@@ -45,7 +54,7 @@ def generate_pdf(df, report_type):
     total_sum = 0
     for _, row in df.iterrows():
         pdf.cell(35, 10, str(row['customer_name'])[:15], 1)
-        pdf.cell(35, 10, str(row['start_time'])[5:16], 1)
+        pdf.cell(35, 10, str(row['start_time'])[5:16] if row['start_time'] else "-", 1)
         pdf.cell(35, 10, str(row['return_time'])[5:16] if row['return_time'] else "-", 1)
         pdf.cell(25, 10, f"{row['total_bill'] or 0}", 1)
         pdf.cell(30, 10, "Paid" if row['is_paid'] else "Settled", 1); pdf.ln()
@@ -124,15 +133,20 @@ else:
         for _, row in active.iterrows():
             with st.container(border=True):
                 col_a, col_b = st.columns([1, 3])
-                if row['customer_photo']: col_a.image(base64.b64decode(row['customer_photo']), width=100)
+                img_bytes = safe_b64_decode(row['customer_photo'])
+                if img_bytes:
+                    col_a.image(img_bytes, width=100)
+                else:
+                    col_a.write("No Photo")
+                
                 col_b.write(f"**{row['name']}** -> {row['customer_name']}")
                 col_b.caption(f"Started: {row['start_time']}")
                 if col_b.button("Return Item", key=f"ret_{row['id']}", use_container_width=True):
-                    # Robust Time Parsing
                     try:
-                        start_dt = pd.to_datetime(row['start_time'])
+                        start_dt = pd.to_datetime(row['start_time'], errors='coerce')
+                        if pd.isna(start_dt): start_dt = datetime.now()
                     except:
-                        start_dt = datetime.now() # Fallback if data is corrupted
+                        start_dt = datetime.now()
                     
                     diff = datetime.now() - start_dt
                     days = max(1, diff.days + (1 if diff.seconds > 60 else 0))
@@ -158,7 +172,6 @@ else:
         st.header("📊 Reports")
         history_df = conn.query("SELECT * FROM rentals WHERE status='Closed'", ttl=0)
         if not history_df.empty:
-            # FIX: Format-flexible date parsing
             history_df['date_obj'] = pd.to_datetime(history_df['start_time'], errors='coerce').dt.date
             f_mode = st.radio("Duration", ["Today", "This Month", "Custom"], horizontal=True)
             if f_mode == "Today": start_f = end_f = date.today()
@@ -171,7 +184,7 @@ else:
                 st.download_button("📥 Download Report (PDF)", generate_pdf(f_df, f_mode), f"Report_{f_mode}.pdf", "application/pdf")
 
     with tab_hist:
-        st.header("📜 Search History")
+        st.header("📜 History & Management")
         full_df = conn.query("SELECT * FROM rentals WHERE status='Closed' ORDER BY id DESC", ttl=0)
         search = st.text_input("🔍 Search Name or Phone Number").lower()
         if search:
@@ -180,7 +193,23 @@ else:
         for _, row in full_df.iterrows():
             with st.expander(f"{row['customer_name']} | Bill: {CURRENCY}{row['total_bill']}"):
                 c1, c2 = st.columns([1, 3])
-                if row['customer_photo']: c1.image(base64.b64decode(row['customer_photo']), width=150)
+                img_bytes = safe_b64_decode(row['customer_photo'])
+                if img_bytes:
+                    c1.image(img_bytes, width=150)
+                else:
+                    c1.write("No Photo Available")
+                
                 c2.write(f"**🕒 Rented:** {row['start_time']}")
                 c2.write(f"**🕒 Returned:** {row['return_time'] or 'N/A'}")
                 c2.write(f"**📞 Phone:** {row['customer_phone']}")
+                
+                st.divider()
+                st.warning("Danger Zone")
+                conf_del = st.checkbox("I want to delete this record permanently", key=f"chk_{row['id']}")
+                if conf_del:
+                    if st.button("🔥 Delete Record", key=f"del_{row['id']}", type="primary"):
+                        with conn.session as session:
+                            session.execute(text("DELETE FROM rentals WHERE id = :id"), {"id": int(row['id'])})
+                            session.commit()
+                        st.success("Record Deleted Successfully")
+                        st.rerun()
