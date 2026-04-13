@@ -13,21 +13,16 @@ CURRENCY = "Rs."
 IST = pytz.timezone('Asia/Kolkata')
 DB_LIMIT_MB = 512.0
 
-# --- CUSTOM CSS FOR THE NEW BACKGROUND ---
+# --- CUSTOM CSS (FIXED INDENTATION) ---
 st.markdown("""
 <style>
-    /* Background Gradient */
     .stApp {
         background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
         background-attachment: fixed;
     }
-    
-    /* Global Text Color for readability on dark bg */
-    .stApp, p, label {
+    .stApp, p, label, .stMarkdown {
         color: #f8fafc !important;
     }
-
-    /* Glass-morphism for Containers */
     div[data-testid="stVerticalBlock"] > div > div[data-testid="stVerticalBlock"] {
         background-color: rgba(255, 255, 255, 0.05);
         padding: 20px;
@@ -35,8 +30,6 @@ st.markdown("""
         backdrop-filter: blur(10px);
         border: 1px solid rgba(255, 255, 255, 0.1);
     }
-
-    /* Header Styling */
     .main-header {
         font-size: 2.5rem;
         color: #38bdf8;
@@ -45,50 +38,34 @@ st.markdown("""
         padding: 20px;
         text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
     }
-
-    /* Tabs Styling */
     .stTabs [data-baseweb="tab-list"] { background-color: transparent; }
-    .stTabs [data-baseweb="tab"] {
-        color: #94a3b8;
-        font-weight: 600;
-    }
-    .stTabs [aria-selected="true"] {
-        color: #38bdf8 !important;
-        border-bottom-color: #38bdf8 !important;
-    }
-
-    /* Sidebar Background */
-    section[data-testid="stSidebar"] {
-        background-color: rgba(15, 23, 42, 0.95) !important;
-    }
+    .stTabs [data-baseweb="tab"] { color: #94a3b8; font-weight: 600; }
+    .stTabs [aria-selected="true"] { color: #38bdf8 !important; border-bottom-color: #38bdf8 !important; }
+    section[data-testid="stSidebar"] { background-color: rgba(15, 23, 42, 0.95) !important; }
 </style>
 """, unsafe_markdown=True)
 
-# --- PERSISTENT SESSION INITIALIZATION ---
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-if 'user_name' not in st.session_state:
-    st.session_state.user_name = ""
+# --- PERSISTENT SESSION ---
+if 'logged_in' not in st.session_state: st.session_state.logged_in = False
+if 'user_name' not in st.session_state: st.session_state.user_name = ""
 
 # --- DATABASE CONNECTION ---
 conn = st.connection("postgresql", type="sql")
 
-# --- OPTIMIZED CACHING ---
+# --- HELPERS ---
 @st.cache_data(ttl=300)
 def get_cached_inventory():
     return conn.query("SELECT * FROM inventory", ttl=0)
 
-def get_now_ist(): 
-    return datetime.now(IST)
+def get_now_ist(): return datetime.now(IST)
 
 def safe_b64_decode(img_str):
-    if not img_str or not isinstance(img_str, str) or img_str.strip() in ["", "None"]: 
-        return None
+    if not img_str or not isinstance(img_str, str) or img_str.strip() in ["", "None"]: return None
     try: return base64.b64decode(img_str)
     except: return None
 
-def make_hashes(password): return hashlib.sha256(str.encode(password)).hexdigest()
-def check_hashes(password, hashed_text): return hashlib.sha256(str.encode(password)).hexdigest() == hashed_text
+def make_hashes(p): return hashlib.sha256(str.encode(p)).hexdigest()
+def check_hashes(p, h): return hashlib.sha256(str.encode(p)).hexdigest() == h
 
 def get_storage_usage():
     try:
@@ -97,7 +74,7 @@ def get_storage_usage():
         return total_bytes / (1024 * 1024)
     except: return 0.0
 
-# --- MAIN INTERFACE ---
+# --- UI LOGIC ---
 if not st.session_state.logged_in:
     st.markdown(f"<h1 class='main-header'>🔐 {SHOP_NAME}</h1>", unsafe_markdown=True)
     col_l, col_m, col_r = st.columns([1,2,1])
