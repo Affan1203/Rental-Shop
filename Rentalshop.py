@@ -13,9 +13,9 @@ CURRENCY = "Rs."
 IST = pytz.timezone('Asia/Kolkata')
 DB_LIMIT_MB = 512.0
 
-# --- CUSTOM CSS FOR PREMIUM UI ---
+# --- CUSTOM CSS (FIXED INDENTATION) ---
 st.markdown("""
-    <style>
+<style>
     .stApp { background-color: #f4f7f9; }
     .main-header {
         font-size: 2.2rem;
@@ -37,8 +37,8 @@ st.markdown("""
     .stTabs [aria-selected="true"] { background-color: #1e3a8a !important; color: white !important; }
     div[data-testid="stMetricValue"] { color: #1e3a8a; font-weight: 700; }
     .footer { text-align: center; color: #64748b; font-size: 0.8rem; margin-top: 50px; }
-    </style>
-    """, unsafe_markdown=True)
+</style>
+""", unsafe_markdown=True)
 
 # --- DATABASE CONNECTION ---
 conn = st.connection("postgresql", type="sql")
@@ -100,12 +100,8 @@ else:
     st.sidebar.subheader("🗄️ Database Health")
     used_mb = get_storage_usage()
     usage_per = min(used_mb / DB_LIMIT_MB, 1.0)
-    
-    # Visual Storage Bar
-    bar_color = "green" if usage_per < 0.7 else "orange" if usage_per < 0.9 else "red"
     st.sidebar.progress(usage_per)
     st.sidebar.caption(f"**Used:** {used_mb:.2f} MB / {DB_LIMIT_MB} MB")
-    
     if st.sidebar.button("🔄 Sync & Refresh"): st.rerun()
     st.sidebar.divider()
     if st.sidebar.button("🚪 Logout", use_container_width=True): 
@@ -113,7 +109,6 @@ else:
 
     # --- MAIN UI ---
     st.markdown(f"<h1 class='main-header'>📸 {SHOP_NAME}</h1>", unsafe_markdown=True)
-    
     tab_dash, tab_inv, tab_rev, tab_hist = st.tabs(["🚀 Dashboard", "📦 Inventory", "💰 Finance", "📜 History"])
 
     with tab_dash:
@@ -128,9 +123,9 @@ else:
 
             with cust_tab_new:
                 c1, c2 = st.columns(2)
-                c_name = c1.text_input("Name *", placeholder="Enter name...", key="name_new_input")
-                c_phone = c2.text_input("Phone *", placeholder="Enter phone...", key="phone_new_input")
-                pm = st.radio("Identity Method", ["No Photo", "Camera", "Upload"], horizontal=True)
+                c_name = c1.text_input("Name *", key="n_new")
+                c_phone = c2.text_input("Phone *", key="p_new")
+                pm = st.radio("Identity", ["No Photo", "Camera", "Upload"], horizontal=True)
                 if pm == "Camera":
                     img = st.camera_input("Snap")
                     if img: encoded_img = base64.b64encode(img.getvalue()).decode()
@@ -151,7 +146,7 @@ else:
                         st.info(f"Identity Loaded: {c_name}")
                         ib = safe_b64_decode(encoded_img)
                         if ib: st.image(ib, width=120)
-                else: st.info("No past records found.")
+                else: st.info("No records found.")
 
             st.divider()
             col_x, col_y = st.columns(2)
@@ -173,15 +168,12 @@ else:
 
         st.subheader("⏳ Live Sessions")
         active = conn.query("SELECT r.*, i.name, i.rate FROM rentals r JOIN inventory i ON r.item_id = i.id WHERE r.status='Active' ORDER BY r.id DESC", ttl=0)
-        if active.empty: st.caption("No active rentals.")
         for _, row in active.iterrows():
             with st.container(border=True):
                 col_i, col_t, col_b = st.columns([1, 3, 1.5])
                 ib = safe_b64_decode(row['customer_photo'])
                 if ib: col_i.image(ib, width=80)
-                else: col_i.write("👤")
-                col_t.markdown(f"**{row['name']}**")
-                col_t.write(f"{row['customer_name']} | {row['customer_phone']}")
+                col_t.markdown(f"**{row['name']}** | {row['customer_name']}")
                 if col_b.button("✅ End Rental", key=f"ret_{row['id']}", use_container_width=True):
                     now = get_now_ist()
                     try: start = IST.localize(datetime.strptime(row['start_time'], "%Y-%m-%d %I:%M %p"))
@@ -197,10 +189,10 @@ else:
         st.subheader("Stock Management")
         with st.expander("➕ Add New Inventory"):
             c1, c2, c3 = st.columns(3)
-            n, r, q = c1.text_input("Item Name"), c2.number_input("Rate", min_value=0.0), c3.number_input("Stock", min_value=1)
+            ni, ri, qi = c1.text_input("Item Name"), c2.number_input("Rate", min_value=0.0), c3.number_input("Stock", min_value=1)
             if st.button("Save Item", type="primary"):
                 with conn.session as session:
-                    session.execute(text("INSERT INTO inventory (name, rate, total_qty, rented_qty) VALUES (:n, :r, :q, 0)"), {"n": n, "r": r, "q": q})
+                    session.execute(text("INSERT INTO inventory (name, rate, total_qty, rented_qty) VALUES (:n, :r, :q, 0)"), {"n": ni, "r": ri, "q": qi})
                     session.commit(); st.rerun()
         st.dataframe(conn.query("SELECT name as \"Item\", rate as \"Rate\", total_qty as \"Total\", rented_qty as \"Rented\" FROM inventory", ttl=0), use_container_width=True)
 
@@ -210,47 +202,38 @@ else:
         if not hist.empty:
             hist['date_obj'] = pd.to_datetime(hist['start_time'], errors='coerce').dt.date
             today = get_now_ist().date()
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Today", f"{CURRENCY} {hist[hist['date_obj'] == today]['total_bill'].sum():,.0f}")
+            m1, m2 = st.columns(2)
+            m1.metric("Today's Revenue", f"{CURRENCY} {hist[hist['date_obj'] == today]['total_bill'].sum():,.0f}")
             m2.metric("Total Billable", f"{CURRENCY} {hist['total_bill'].sum():,.0f}")
-            m3.metric("Total Orders", len(hist))
-        else: st.info("No completed transactions yet.")
+        else: st.info("No data.")
 
     with tab_hist:
         st.subheader("Transaction Logs")
         full_hist = conn.query("SELECT * FROM rentals WHERE status='Closed' ORDER BY id DESC", ttl=0)
-        
-        # --- FIXED BULK DELETE LOGIC ---
         bulk_mode = st.toggle("🛠️ Enable Bulk Delete Mode")
         
         if bulk_mode:
             if not full_hist.empty:
-                # The Master Select All checkbox
-                select_all = st.checkbox("✅ Select All Records", key="master_checkbox")
-                
+                # FIXED BULK DELETE LOGIC
+                select_all = st.checkbox("✅ Select All Records", key="master_del")
                 to_delete = []
                 st.divider()
                 for _, row in full_hist.iterrows():
-                    # value is tied to the master select_all state
                     is_checked = st.checkbox(f"{row['customer_name']} | {row['start_time'][:10]}", key=f"del_{row['id']}", value=select_all)
                     if is_checked: to_delete.append(int(row['id']))
-                
-                st.divider()
-                if to_delete:
-                    if st.button(f"🔥 Permanently Delete {len(to_delete)} Records", type="primary", use_container_width=True):
-                        with conn.session as session:
-                            session.execute(text("DELETE FROM rentals WHERE id IN :ids"), {"ids": tuple(to_delete)})
-                            session.commit(); st.success("Records Deleted"); st.rerun()
-            else: st.info("No records to delete.")
+                if to_delete and st.button(f"🔥 Permanently Delete {len(to_delete)} Records", type="primary", use_container_width=True):
+                    with conn.session as session:
+                        session.execute(text("DELETE FROM rentals WHERE id IN :ids"), {"ids": tuple(to_delete)})
+                        session.commit(); st.success("Records Deleted"); st.rerun()
+            else: st.info("No records.")
         else:
-            q = st.text_input("🔍 Search History", placeholder="Name or phone...")
+            q = st.text_input("🔍 Search History")
             if q: full_hist = full_hist[full_hist.apply(lambda r: q.lower() in str(r['customer_name']).lower() or q in str(r['customer_phone']), axis=1)]
             for _, row in full_hist.iterrows():
                 with st.expander(f"📄 {row['customer_name']} | {CURRENCY}{row['total_bill']}"):
                     c1, c2 = st.columns([1, 3])
                     ib = safe_b64_decode(row['customer_photo'])
                     if ib: c1.image(ib, width=120)
-                    c2.write(f"📞 {row['customer_phone']}")
-                    c2.write(f"🕒 {row['start_time']} to {row['return_time']}")
+                    c2.write(f"📞 {row['customer_phone']} | 🕒 {row['start_time']} to {row['return_time']}")
 
-    st.markdown("<div class='footer'>© 2026 Star Arts and Multiservices | Developed for Business Growth</div>", unsafe_markdown=True)
+    st.markdown("<div class='footer'>© 2026 Star Arts and Multiservices</div>", unsafe_markdown=True)
